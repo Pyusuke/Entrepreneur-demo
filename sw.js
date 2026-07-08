@@ -8,9 +8,9 @@
  *   新しいSWがactivateされた時点で旧キャッシュは削除され、
  *   次回ロードから新しいファイルが配信される。
  */
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const CACHE_NAME = "tankyu-card-game-" + CACHE_VERSION;
-const ASSETS = ["./", "./index.html"];
+const ASSETS = ["./", "./index.html", "./html2canvas.min.js"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

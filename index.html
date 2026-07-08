@@ -98,7 +98,8 @@
     display:flex;flex-direction:column;overflow:hidden;position:relative;
     user-select:none;
   }
-  .card .band{padding:5px 10px;font-size:11.5px;font-weight:700;color:#fff;letter-spacing:.05em;}
+  /* バンドは右に余白を取り、✕ボタンと文字が重ならないようにする */
+  .card .band{padding:5px 26px 5px 10px;font-size:11.5px;font-weight:700;color:#fff;letter-spacing:.05em;}
   .card .body{padding:9px 10px;flex:1;display:flex;flex-direction:column;gap:5px;}
   .card .ttl{font-size:15px;font-weight:700;line-height:1.45;word-break:break-word;}
   .card .ctx{font-size:11.5px;color:var(--ink-soft);line-height:1.5;word-break:break-word;}
@@ -115,6 +116,8 @@
   .card.t-future .band.b-seika{background:var(--c-seika);color:#fff;border-bottom:none;}
   .card.t-future .band.b-process{background:var(--c-process);color:#fff;border-bottom:none;}
   .card.t-future .band.b-skill{background:var(--c-skill);color:#fff;border-bottom:none;}
+  /* 「まだ実物ではない」等のキャプションはバンドから本文下部へ移動（✕との重なり回避） */
+  .card.t-future .fcap{margin-top:auto;font-size:10px;color:#9a8cc0;border-top:1px dashed #ddd0f8;padding-top:5px;}
   .card .del{
     position:absolute;top:3px;right:5px;background:none;border:none;cursor:pointer;
     font-size:15px;color:rgba(255,255,255,.85);line-height:1;padding:2px 4px;
@@ -242,6 +245,13 @@
     .steps .st{font-size:12px;}
   }
 
+  /* ===== 画像保存中（html2canvasは3D変形を再現できないため平面化する） ===== */
+  .capturing .no-print{display:none !important;}
+  .capturing .flip3d .inner{transform:none !important;transition:none !important;}
+  .capturing .flip3d.flipped .front{visibility:hidden;}
+  .capturing .flip3d.flipped .back{transform:none !important;}
+  .capturing .flip3d:not(.flipped) .back{visibility:hidden;}
+
   /* ===== 印刷（まとめ画面 A4縦） ===== */
   @media print{
     body{background:#fff;font-size:11px;}
@@ -262,6 +272,8 @@
 <div id="toast"></div>
 <div id="modal-mount"></div>
 
+<!-- 画像保存用（ローカル同梱。CDN不使用でオフライン要件を維持） -->
+<script src="./html2canvas.min.js"></script>
 <script>
 "use strict";
 /* =========================================================
@@ -278,6 +290,10 @@ const PASSWORDS = {
   3: "0120",   // ③お題1 → ④お題2
   4: "999",    // ④お題2 → まとめ
 };
+/* 設定画面のJSONエクスポート/インポート用（運営用） */
+const ADMIN_PASSWORD = "13579";
+/* エクスポートJSONに埋めるデータ形式バージョン */
+const DATA_VERSION = 2;
 
 const LS_KEY = "tankyu-card-game-v1";
 const MAX_HAND = 5;          // 手作りカードの上限（余白で5枚に揃える）
@@ -356,16 +372,18 @@ function defaultState(){
 
 let S = loadState();
 
+/* 旧バージョンのデータ形式を現行に揃える（localStorage読込とJSONインポートで共用） */
+function normalizeState(parsed){
+  const st = Object.assign(defaultState(), parsed);
+  if(!Array.isArray(st.passed)) st.passed = [];
+  st.cards.forEach(c => { if(c.type === "future" && !c.phase) c.phase = 1; });
+  return st;
+}
+
 function loadState(){
   try{
     const raw = localStorage.getItem(LS_KEY);
-    if(raw){
-      const st = Object.assign(defaultState(), JSON.parse(raw));
-      // 旧データの移行：未来カードに phase / passed 配列がない場合
-      if(!Array.isArray(st.passed)) st.passed = [];
-      st.cards.forEach(c => { if(c.type === "future" && !c.phase) c.phase = 1; });
-      return st;
-    }
+    if(raw) return normalizeState(JSON.parse(raw));
   }catch(e){ /* 壊れたデータは捨てる */ }
   return defaultState();
 }
@@ -390,16 +408,17 @@ function toast(msg){
   toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
 }
 
-/* ---------------- パスワードゲート ---------------- */
-let gateCb = null, gateStep = 0;
-function gate(fromStep, onOk){
-  if(!PASSWORDS[fromStep] || S.passed.includes(fromStep)){ onOk(); return; }
-  gateCb = onOk; gateStep = fromStep;
+/* ---------------- パスワードモーダル（画面遷移と設定操作で共用） ---------------- */
+let pwExpected = null, pwCb = null, pwWrongMsg = "";
+function askPassword(expected, onOk, opts = {}){
+  pwExpected = expected;
+  pwCb = onOk;
+  pwWrongMsg = opts.wrongMsg || "番号がちがいます";
   document.getElementById("modal-mount").innerHTML = `
   <div class="modal-bg" onclick="if(event.target===this)closeModal()">
     <div class="modal" style="max-width:340px;text-align:center;">
-      <h3>🔑 先生の合図で進もう</h3>
-      <p class="soft">先生から伝えられた番号を入れてください。</p>
+      <h3>${opts.title || "🔑 番号を入れてください"}</h3>
+      <p class="soft">${opts.note || ""}</p>
       <input type="text" inputmode="numeric" autocomplete="off" id="pw-input" class="pw-input"
         onkeydown="if(event.key==='Enter')submitGate()">
       <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;">
@@ -412,16 +431,28 @@ function gate(fromStep, onOk){
 }
 function submitGate(){
   const v = document.getElementById("pw-input").value.trim();
-  if(v === PASSWORDS[gateStep]){
-    S.passed.push(gateStep);
-    save();
-    const cb = gateCb; gateCb = null;
+  if(v === pwExpected){
+    const cb = pwCb; pwCb = null;
     closeModal();
     if(cb) cb();
   }else{
     document.getElementById("pw-input").value = "";
-    toast("先生の合図を待ってね");
+    toast(pwWrongMsg);
   }
+}
+
+/* 画面遷移ゲート：一度通過したステップは再入力不要 */
+function gate(fromStep, onOk){
+  if(!PASSWORDS[fromStep] || S.passed.includes(fromStep)){ onOk(); return; }
+  askPassword(PASSWORDS[fromStep], () => {
+    S.passed.push(fromStep);
+    save();
+    onOk();
+  }, {
+    title: "🔑 先生の合図で進もう",
+    note: "先生から伝えられた番号を入れてください。",
+    wrongMsg: "先生の合図を待ってね",
+  });
 }
 
 /* ---------------- カードHTML ---------------- */
@@ -438,12 +469,13 @@ function cardHTML(c, opts = {}){
   if(c.type === "future"){
     const ftLabel = c.futureType ? "未来の" + TYPES[c.futureType].label : "未来";
     const bandCls = c.futureType ? "b-" + c.futureType : "";
-    const suffix = (c.phase || 1) === 2 ? "（目指し直し）" : "（まだ実物ではない）";
+    const cap = (c.phase || 1) === 2 ? "目指し直し（お題2で再発行）" : "まだ実物ではない";
     return `<div class="card t-future ${extra}" data-cid="${c.id}">
-      <div class="band ${bandCls}">${ftLabel}${suffix}</div>
+      <div class="band ${bandCls}">${ftLabel}</div>
       <div class="body">
         <div class="ttl">${esc(c.title)}</div>
         <div class="ctx">${esc(c.context)}</div>
+        <div class="fcap">${cap}</div>
       </div>${del}</div>`;
   }
   const ctx = c.type === "skill" ? `出典：${esc(c.context)}` : esc(c.context);
@@ -1232,16 +1264,61 @@ function viewSummary(){
 
   <div class="navrow no-print">
     <button class="btn sub" onclick="go(4)">← もどる</button>
-    <button class="btn" onclick="window.print()">🖨 印刷・画像保存</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+      <button class="btn" onclick="saveImage()">📷 画像で保存</button>
+      <button class="btn sub" onclick="window.print()">🖨 印刷</button>
+    </div>
   </div>
   <p class="soft no-print" style="text-align:center;margin-top:10px;">
-    スクリーンショットを撮っておくと、振り返りのときに見返せます。
+    保存した画像は、振り返りのときに見返せます。
   </p>`;
 }
 
 document.addEventListener("input", e => {
   if(e.target.id === "sum-note"){ S.summaryNote = e.target.value; save(); }
 });
+
+/* まとめ画面をPNG画像として保存（html2canvas利用・ローカル同梱） */
+function pad2(n){ return String(n).padStart(2, "0"); }
+function dateStamp(){
+  const d = new Date();
+  return `${d.getFullYear()}${pad2(d.getMonth()+1)}${pad2(d.getDate())}`;
+}
+/* ニックネームをファイル名に使える形にする（パス区切り等の危険文字だけ除去） */
+function fileSafe(name){
+  const s = String(name || "").replace(/[\\/:*?"<>|]/g, "_").trim();
+  return s || "noname";
+}
+/* Blobを指定ファイル名でダウンロードする
+   注：download属性のファイル名が効くのはHTTP(S)配信時。file://で直接開いた場合は
+   ブラウザ既定の名前になることがある（本番はVercel等のHTTP配信を想定） */
+function downloadBlob(blob, filename){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+async function saveImage(){
+  try{
+    if(typeof html2canvas !== "function") throw new Error("html2canvas not loaded");
+    document.body.classList.add("capturing");   // 3D裏返しを平面化し、ボタン類を隠す
+    const canvas = await html2canvas(document.getElementById("app"), {
+      backgroundColor: "#f4f2ec",
+      scale: 2,
+    });
+    document.body.classList.remove("capturing");
+    const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+    if(!blob) throw new Error("toBlob failed");
+    downloadBlob(blob, `たんきゅうカード_${fileSafe(S.nickname)}_${dateStamp()}.png`);
+    toast("画像を保存しました");
+  }catch(e){
+    document.body.classList.remove("capturing");
+    toast("うまく保存できないときは、スクリーンショットを撮ってね");
+  }
+}
 
 /* =========================================================
    モーダル：能力の語彙集
@@ -1270,7 +1347,14 @@ function openSettings(){
       <h3>⚙ 設定（先生用）</h3>
       <p class="soft">この端末に保存されたデータの管理をします。</p>
       <div style="margin:16px 0;">
-        <button class="btn sub" style="width:100%;border-color:#e0b4a5;color:#b13b1c;" onclick="resetAll()">🗑 全データリセット（端末の使い回し用）</button>
+        <button class="btn sub" style="width:100%;border-color:#e0b4a5;color:#b13b1c;" onclick="resetAll()">🗑 データリセット</button>
+      </div>
+      <div style="margin:16px 0;border:1px solid var(--line);border-radius:10px;padding:12px;">
+        <div style="display:flex;gap:8px;flex-direction:column;">
+          <button class="btn small sub" onclick="exportJSON()">📤 データをJSONで書き出す（エクスポート）</button>
+          <button class="btn small sub" onclick="importJSON()">📥 JSONを読み込む（インポート）</button>
+        </div>
+        <p class="soft" style="margin-top:8px;font-size:11.5px;">授業前のバックアップ・テストプレイのデータ回収用。実行には運営用の番号が必要です。</p>
       </div>
       <details>
         <summary style="cursor:pointer;font-size:13px;color:var(--ink-soft);">動作確認用テストデータ（4ペルソナ）</summary>
@@ -1288,24 +1372,87 @@ function openSettings(){
 }
 
 function resetAll(){
-  if(!confirm("この端末のデータをすべて消します。よろしいですか？")) return;
+  if(!confirm("この端末のデータをすべて消します。消したデータは復元できません。よろしいですか？")) return;
   localStorage.removeItem(LS_KEY);
   S = defaultState();
-  form1 = { type:"seika", title:"", context:"", cat:"", sourceId:"", explainOpen:true };
-  form3 = { ftype:"", title:"", ctx:"" };
-  form4 = { ftype:"", title:"", ctx:"" };
+  resetForms();
   closeModal();
   render();
   toast("すべてのデータを消しました");
+}
+function resetForms(){
+  form1 = { type:"seika", title:"", context:"", cat:"", sourceId:"", explainOpen:true };
+  form3 = { ftype:"", title:"", ctx:"" };
+  form4 = { ftype:"", title:"", ctx:"" };
+}
+
+/* ---------------- JSONエクスポート／インポート（運営用・要パスワード） ---------------- */
+function exportJSON(){
+  askPassword(ADMIN_PASSWORD, () => {
+    const d = new Date();
+    const stamp = `${dateStamp()}-${pad2(d.getHours())}${pad2(d.getMinutes())}`;
+    const payload = {
+      app: "tankyu-card-game",
+      dataVersion: DATA_VERSION,
+      exportedAt: d.toISOString(),
+      state: S,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"});
+    downloadBlob(blob, `tankyu-save_${fileSafe(S.nickname)}_${stamp}.json`);
+    toast("保存データを書き出しました");
+  }, {title: "🔑 運営用の番号", note: "エクスポートには運営用の番号が必要です。"});
+}
+
+function validateSave(obj){
+  return !!(obj
+    && obj.app === "tankyu-card-game"
+    && typeof obj.dataVersion === "number" && obj.dataVersion <= DATA_VERSION
+    && obj.state && typeof obj.state === "object"
+    && typeof obj.state.nickname === "string"
+    && typeof obj.state.step === "number"
+    && Array.isArray(obj.state.cards)
+    && obj.state.step3 && typeof obj.state.step3 === "object"
+    && obj.state.step4 && typeof obj.state.step4 === "object");
+}
+
+function importJSON(){
+  askPassword(ADMIN_PASSWORD, () => {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "application/json,.json";
+    inp.onchange = () => {
+      const file = inp.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        let obj = null;
+        try{ obj = JSON.parse(reader.result); }catch(e){ /* 下のバリデーションで弾く */ }
+        if(!validateSave(obj)){
+          toast("このファイルは読み込めません（形式がちがいます）");
+          return;   // 現在のデータは変更しない
+        }
+        if(!confirm("現在のデータは読み込んだ内容で上書きされ、元に戻せません。よろしいですか？")) return;
+        S = normalizeState(obj.state);
+        save();
+        resetForms();
+        render();
+        toast("データを読み込みました");
+      };
+      reader.readAsText(file);
+    };
+    inp.click();
+  }, {title: "🔑 運営用の番号", note: "インポートには運営用の番号が必要です。"});
 }
 
 /* ---------------- テスト用ペルソナ ---------------- */
 function loadPersona(key){
   const P = buildPersona(key);
   if(!P) return;
+  if(!confirm("現在のデータは消え、テストデータに入れ替わります。元のデータは復元できません。よろしいですか？")) return;
   localStorage.removeItem(LS_KEY);
   S = P;
   save();
+  resetForms();
   closeModal();
   render();
   toast(`テストデータ「${P.nickname}」を読み込みました`);
@@ -1314,8 +1461,10 @@ function loadPersona(key){
 function buildPersona(key){
   const mk = (type, title, context, category, sourceId) =>
     ({ id: uid(), type, title, context, category: category || "", sourceId: sourceId || null });
-  const mkFuture = (title, context, futureType) =>
-    ({ id: uid(), type: "future", title, context, category: "", sourceId: null, futureType, phase: 1 });
+  const mkFuture = (title, context, futureType, phase) =>
+    ({ id: uid(), type: "future", title, context, category: "", sourceId: null, futureType, phase });
+  const mkBlank = () =>
+    ({ id: uid(), type: "blank", title: "", context: "", category: "", sourceId: null });
 
   if(key === "mina"){
     const c1 = mk("seika","商店街調査の発表をやり切った","商店主15人の声を全校に発表","探究");
@@ -1323,33 +1472,43 @@ function buildPersona(key){
     const c3 = mk("process","商店主にインタビューを申し込んだ","知らない大人に自分から連絡した","探究");
     const c4 = mk("skill","初対面の大人に話を聞ける力", c3.title, "探究", c3.id);
     const c5 = mk("skill","データを集め直す粘り強さ", c2.title, "探究", c2.id);
-    const f1 = mkFuture("働く現場で大人と協働する力","バイト先で年上の人とチームで動く","skill");
+    const f1 = mkFuture("働く現場で大人と協働する力","バイト先で年上の人とチームで動く","skill",1);
+    const f2 = mkFuture("知り合いを頼って別の現場を探す","商店街のつながりを使う","process",2);
     return Object.assign(defaultState(), {
       nickname:"ミナ", step:1,
-      cards:[c1,c2,c3,c4,c5,f1],
+      cards:[c1,c2,c3,c4,c5,f1,f2],
       step3:{ menus:[1,5], why:"働く経験と、自分で始める経験は両方ほしいから。", effectiveIds:[c4.id,c5.id] },
+      step4:{ playedIds:[c3.id,c5.id], action:"バイトが合わなくても、人に聞きに行く力は消えない。別の場所を探す。", decl:{} },
     });
   }
   if(key === "kenta"){
     const c1 = mk("seika","野球部で3年間続けた記録","レギュラーでなくても最後まで","部活");
     const c2 = mk("process","自主練メニューを組んで毎朝続けた","結果が出ない時期も朝練を欠かさず","部活");
     const c3 = mk("skill","結果が出なくても継続する力", c2.title, "部活", c2.id);
-    const f1 = mkFuture("野球以外の世界を3つのぞく","サークル・バイト・イベントを見て回る","process");
+    const b1 = mkBlank(), b2 = mkBlank();
+    const f1 = mkFuture("野球以外の世界を3つのぞく","サークル・バイト・イベントを見て回る","process",1);
+    const f2 = mkFuture("野球以外の場に月1で通い続ける","小さく顔を出すのを続ける","process",2);
     return Object.assign(defaultState(), {
       nickname:"ケンタ", step:1,
-      cards:[c1,c2,c3,f1],
+      cards:[c1,c2,c3,b1,b2,f1,f2],
       step3:{ menus:[0,6], why:"部活は続けたい。でも野球しか知らないから、余白は⑦と一緒に切って世界を広げる。", effectiveIds:[c3.id] },
+      step4:{ playedIds:[c3.id,b1.id], action:"続ける力はある。月1のペースなら、飽きても続けられる。",
+              decl:{ [b1.id]:"私はこの状況で、野球以外の仲間を獲りに行きます" } },
     });
   }
   if(key === "aoi"){
     const c1 = mk("seika","弟妹の朝の支度を3年間担当","家族の朝を毎日まわしてきた","日常・生活");
     const c2 = mk("process","家事と勉強の時間をやりくりし続けた","部活はできなかったが両立した","日常・生活");
     const c3 = mk("skill","限られた時間で優先順位をつける力", c2.title, "日常・生活", c2.id);
-    const f1 = mkFuture("自分で稼いだお金で決める経験","バイト代の使いみちを自分で決める","seika");
+    const b1 = mkBlank(), b2 = mkBlank();
+    const f1 = mkFuture("自分で稼いだお金で決める経験","バイト代の使いみちを自分で決める","seika",1);
+    const f2 = mkFuture("自分に合うバイトを2〜3か所試す","短期で試して見極める","process",2);
     return Object.assign(defaultState(), {
       nickname:"アオイ", step:1,
-      cards:[c1,c2,c3,f1],
+      cards:[c1,c2,c3,b1,b2,f1,f2],
       step3:{ menus:[1,4], why:"家の外の世界で、自分の時間とお金を自分で動かしてみたいから。", effectiveIds:[c3.id] },
+      step4:{ playedIds:[c3.id,b1.id], action:"時間のやりくりは得意。短期で試して、合う場所を選ぶ。",
+              decl:{ [b1.id]:"私はこの状況で、自分に合う職場を獲りに行きます" } },
     });
   }
   if(key === "yu"){
@@ -1357,11 +1516,15 @@ function buildPersona(key){
     const c2 = mk("process","質問リストを作って先生に聞きに行った","わからない所を言葉にしてから質問","学業");
     const c3 = mk("process","毎日決まった時間に机に向かった","気分に左右されない仕組みを作った","学業");
     const c4 = mk("skill","わからないことを言語化して聞く力", c2.title, "学業", c2.id);
-    const f1 = mkFuture("これだと思える専門分野","1年目は⑦で見て回り、その後③で深める","seika");
+    const b1 = mkBlank();
+    const f1 = mkFuture("これだと思える専門分野","1年目は⑦で見て回り、その後③で深める","seika",1);
+    const f2 = mkFuture("入門講座で向き不向きを確かめる","1つ受けてから決める","process",2);
     return Object.assign(defaultState(), {
       nickname:"ユウ", step:1,
-      cards:[c1,c2,c3,c4,f1],
+      cards:[c1,c2,c3,c4,b1,f1,f2],
       step3:{ menus:[2,6], why:"1年目は⑦でじっくり探し、決まったら③で深める。時間差の計画。", effectiveIds:[c4.id] },
+      step4:{ playedIds:[c4.id,b1.id], action:"質問する力で入門講座の先生に聞きまくって、早めに見極める。",
+              decl:{ [b1.id]:"私はこの状況で、別の分野の入門知識を獲りに行きます" } },
     });
   }
   return null;
