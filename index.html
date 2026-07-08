@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>探究振り返りカードゲーム</title>
+<style>
+  :root{
+    --c-seika:#3b7dd8;   /* 成果=青系 */
+    --c-process:#2e9e6b; /* プロセス=緑系 */
+    --c-skill:#e08a2e;   /* 能力=橙系 */
+    --c-future:#8b5cf6;  /* 未来=紫（点線枠） */
+    --c-blank:#9aa3af;   /* 余白=グレー枠 */
+    --ink:#2b2b33;
+    --ink-soft:#6b7280;
+    --bg:#f4f2ec;
+    --panel:#ffffff;
+    --line:#e2ddd2;
+    --accent:#d95d39;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","Noto Sans JP",system-ui,sans-serif;
+    background:var(--bg); color:var(--ink);
+    line-height:1.65; font-size:15px;
+  }
+  button{font-family:inherit;}
+  #app{max-width:860px;margin:0 auto;padding:0 14px 90px;}
+
+  /* ===== ヘッダー・ステップ表示 ===== */
+  header.top{
+    position:sticky;top:0;z-index:20;background:var(--bg);
+    padding:10px 0 6px;border-bottom:1px solid var(--line);
+    margin-bottom:14px;
+  }
+  .top-row{display:flex;align-items:center;justify-content:space-between;gap:8px;max-width:860px;margin:0 auto;padding:0 14px;}
+  .app-name{font-size:13px;font-weight:700;color:var(--ink-soft);letter-spacing:.04em;}
+  .gear-btn{background:none;border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-size:14px;cursor:pointer;color:var(--ink-soft);}
+  .steps{display:flex;gap:4px;max-width:860px;margin:8px auto 0;padding:0 14px;}
+  .steps .st{
+    flex:1;text-align:center;font-size:10.5px;padding:5px 2px;border-radius:8px;
+    background:#e9e5da;color:#8a8474;white-space:nowrap;overflow:hidden;
+  }
+  .steps .st.now{background:var(--accent);color:#fff;font-weight:700;}
+  .steps .st.done{background:#cfc9ba;color:#6d675a;}
+
+  /* ===== 汎用 ===== */
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
+  h1{font-size:24px;line-height:1.4;}
+  h2{font-size:18px;margin-bottom:8px;}
+  h3{font-size:15px;margin-bottom:6px;}
+  .soft{color:var(--ink-soft);font-size:13px;}
+  .lead{font-size:14px;color:var(--ink-soft);}
+  .btn{
+    display:inline-block;border:none;border-radius:12px;cursor:pointer;
+    padding:12px 22px;font-size:16px;font-weight:700;
+    background:var(--accent);color:#fff;
+  }
+  .btn:disabled{background:#cfc9ba;cursor:not-allowed;}
+  .btn.sub{background:#fff;color:var(--ink);border:1.5px solid var(--line);font-weight:600;}
+  .btn.small{padding:7px 14px;font-size:13px;border-radius:9px;}
+  .navrow{display:flex;justify-content:space-between;gap:10px;margin-top:6px;}
+  textarea,input[type=text]{
+    width:100%;border:1.5px solid var(--line);border-radius:10px;
+    padding:10px 12px;font-size:15px;font-family:inherit;background:#fff;color:var(--ink);
+  }
+  textarea{resize:vertical;min-height:64px;}
+  textarea:focus,input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  select{
+    width:100%;border:1.5px solid var(--line);border-radius:10px;
+    padding:10px 12px;font-size:15px;font-family:inherit;background:#fff;color:var(--ink);
+  }
+  label.f{display:block;font-size:13px;font-weight:700;margin:12px 0 4px;}
+  label.f .req{color:var(--accent);font-size:11px;margin-left:4px;}
+  .hint-box{background:#fdf6ec;border:1px solid #f0e2c8;border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0;}
+  .talk-box{background:#eef4fb;border:1px solid #d5e3f5;border-radius:10px;padding:12px 14px;font-size:14px;margin:12px 0;}
+  .talk-box b{color:var(--c-seika);}
+
+  /* ===== カード ===== */
+  .hand{
+    display:flex;gap:10px;overflow-x:auto;padding:10px 4px 14px;
+    -webkit-overflow-scrolling:touch;touch-action:pan-x;
+  }
+  .card{
+    flex:0 0 auto;width:148px;min-height:196px;
+    background:#fff;border:2px solid var(--line);border-radius:12px;
+    box-shadow:0 2px 6px rgba(0,0,0,.08);
+    display:flex;flex-direction:column;overflow:hidden;position:relative;
+    user-select:none;
+  }
+  .card .band{padding:5px 10px;font-size:12px;font-weight:700;color:#fff;letter-spacing:.08em;}
+  .card .body{padding:9px 10px;flex:1;display:flex;flex-direction:column;gap:5px;}
+  .card .ttl{font-size:15px;font-weight:700;line-height:1.45;word-break:break-word;}
+  .card .ctx{font-size:11.5px;color:var(--ink-soft);line-height:1.5;word-break:break-word;}
+  .card .cat{margin-top:auto;font-size:10.5px;color:var(--ink-soft);border-top:1px dashed var(--line);padding-top:5px;}
+  .card.t-seika{border-color:var(--c-seika);} .card.t-seika .band{background:var(--c-seika);}
+  .card.t-process{border-color:var(--c-process);} .card.t-process .band{background:var(--c-process);}
+  .card.t-skill{border-color:var(--c-skill);} .card.t-skill .band{background:var(--c-skill);}
+  .card.t-blank{border:2px dashed var(--c-blank);box-shadow:none;background:#fcfcfa;}
+  .card.t-blank .band{background:transparent;color:var(--c-blank);border-bottom:1px dashed #d5d9df;}
+  .card.t-blank .blank-msg{margin:auto;text-align:center;color:#b6bcc6;font-size:12px;line-height:1.8;}
+  .card.t-future{border:2.5px dashed var(--c-future);background:#fbf9ff;}
+  .card.t-future .band{background:transparent;color:var(--c-future);border-bottom:1.5px dashed #ddd0f8;}
+  .card .del{
+    position:absolute;top:3px;right:5px;background:none;border:none;cursor:pointer;
+    font-size:15px;color:rgba(255,255,255,.85);line-height:1;padding:2px 4px;
+  }
+  .card.t-blank .del,.card.t-future .del{color:#b7aed0;}
+
+  /* 追加時のめくり */
+  @keyframes deal{from{transform:rotateY(90deg) translateY(8px);opacity:0;}to{transform:rotateY(0) translateY(0);opacity:1;}}
+  .card.deal{animation:deal .45s ease-out;transform-origin:left center;}
+
+  /* 選択（タップで切る） */
+  .card.pickable{cursor:pointer;transition:transform .15s;}
+  .card.pickable:active{transform:scale(.97);}
+  .card.picked{outline:3px solid var(--accent);outline-offset:2px;transform:translateY(-6px);}
+  .card.disabled{opacity:.55;pointer-events:none;}
+
+  /* 裏返し（3D） */
+  .flip3d{flex:0 0 auto;width:148px;min-height:196px;perspective:900px;}
+  .flip3d .inner{
+    position:relative;width:100%;height:100%;min-height:196px;
+    transform-style:preserve-3d;transition:transform .9s cubic-bezier(.6,-0.2,.3,1.2);
+  }
+  .flip3d.flipped .inner{transform:rotateY(180deg);}
+  .flip3d .face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;}
+  .flip3d .face .card{width:100%;height:100%;}
+  .flip3d .back{transform:rotateY(180deg);}
+  .card.future-back{
+    border:2.5px dashed #c9b8ee;background:repeating-linear-gradient(45deg,#f2edfb,#f2edfb 8px,#eae2f8 8px,#eae2f8 16px);
+  }
+  .card.future-back .back-msg{margin:auto;text-align:center;color:#7c6ba8;font-size:12px;font-weight:700;line-height:1.9;padding:10px;}
+  .card.future-back .orig{font-size:10.5px;color:#a294c4;font-weight:400;}
+
+  /* ドラッグ並べ替え */
+  .card.dragging{opacity:.4;}
+  .drag-hint{font-size:11.5px;color:var(--ink-soft);text-align:center;margin-top:-6px;}
+
+  /* ===== STEP1 ===== */
+  details.catbox{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:#fff;overflow:hidden;}
+  details.catbox summary{
+    cursor:pointer;padding:10px 14px;font-weight:700;font-size:14px;list-style:none;
+    display:flex;align-items:center;gap:8px;
+  }
+  details.catbox summary::before{content:"▸";color:var(--accent);transition:transform .2s;}
+  details.catbox[open] summary::before{transform:rotate(90deg);}
+  details.catbox .exs{padding:0 14px 12px;font-size:13px;color:var(--ink-soft);}
+  details.catbox .exs li{margin-left:18px;margin-bottom:2px;}
+  .type-picker{display:flex;gap:8px;margin-top:4px;}
+  .type-picker button{
+    flex:1;padding:10px 4px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;
+    border:2px solid var(--line);background:#fff;color:var(--ink-soft);
+  }
+  .type-picker button.on-seika{border-color:var(--c-seika);background:var(--c-seika);color:#fff;}
+  .type-picker button.on-process{border-color:var(--c-process);background:var(--c-process);color:#fff;}
+  .type-picker button.on-skill{border-color:var(--c-skill);background:var(--c-skill);color:#fff;}
+  .counter{
+    text-align:center;font-size:13.5px;font-weight:700;color:var(--ink-soft);
+    background:#efece3;border-radius:9px;padding:7px;margin-top:10px;
+  }
+  .rule-check{font-size:13px;margin-top:10px;}
+  .rule-check li{list-style:none;margin-bottom:3px;}
+  .rule-check .ok{color:var(--c-process);font-weight:700;}
+  .rule-check .ng{color:var(--accent);}
+
+  /* ===== STEP3 メニュー ===== */
+  .menu-item{
+    display:flex;align-items:flex-start;gap:10px;padding:11px 12px;margin-bottom:7px;
+    border:2px solid var(--line);border-radius:10px;cursor:pointer;background:#fff;font-size:14px;
+  }
+  .menu-item input{width:18px;height:18px;margin-top:2px;flex:none;accent-color:var(--accent);}
+  .menu-item.on{border-color:var(--accent);background:#fdf3ef;font-weight:700;}
+  .menu-item.off{opacity:.45;}
+
+  /* ===== モーダル ===== */
+  .modal-bg{position:fixed;inset:0;background:rgba(35,30,20,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:18px;}
+  .modal{background:#fff;border-radius:16px;max-width:480px;width:100%;max-height:82vh;overflow-y:auto;padding:20px;}
+  .modal h3{margin-bottom:10px;}
+  .vocab{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0;}
+  .vocab span{background:#fdf1e3;border:1px solid #f0d9b8;border-radius:99px;padding:4px 12px;font-size:13px;}
+
+  /* トースト */
+  #toast{
+    position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+    background:var(--ink);color:#fff;padding:10px 18px;border-radius:99px;font-size:13.5px;
+    z-index:99;opacity:0;transition:opacity .3s;pointer-events:none;max-width:90%;
+  }
+  #toast.show{opacity:1;}
+
+  /* STEP4 演出 */
+  .flip-msg{
+    background:#2f2a3d;color:#f0eafc;border-radius:14px;padding:16px 18px;margin-bottom:14px;
+    font-size:14.5px;line-height:1.9;
+  }
+  .flip-msg b{color:#cdb8f5;}
+
+  /* ===== まとめ ===== */
+  .sum-grid{display:flex;flex-wrap:wrap;gap:8px;padding:6px 0;}
+  .sum-grid .card,.sum-grid .flip3d{width:132px;min-height:176px;}
+  .sum-grid .flip3d .inner{min-height:176px;}
+  .ansline{font-size:13.5px;margin-bottom:6px;}
+  .ansline b{color:var(--ink);}
+  .tagchips{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0;}
+  .tagchips span{border-radius:99px;padding:2px 10px;font-size:12px;color:#fff;}
+  .chip-seika{background:var(--c-seika);} .chip-process{background:var(--c-process);}
+  .chip-skill{background:var(--c-skill);} .chip-blank{background:var(--c-blank);}
+  .chip-future{background:var(--c-future);}
+
+  @media (min-width:640px){
+    body{font-size:16px;}
+    .steps .st{font-size:12px;}
+  }
+
+  /* ===== 印刷（まとめ画面 A4縦） ===== */
+  @media print{
+    body{background:#fff;font-size:11px;}
+    header.top,.no-print,#toast{display:none !important;}
+    #app{max-width:100%;padding:0;}
+    .panel{border:1px solid #bbb;padding:8px 10px;margin-bottom:8px;break-inside:avoid;}
+    .sum-grid .card,.sum-grid .flip3d{width:100px;min-height:130px;box-shadow:none;}
+    .sum-grid .flip3d .inner{min-height:130px;}
+    .card .ttl{font-size:11px;} .card .ctx{font-size:9px;} .card .band{font-size:9px;padding:3px 6px;}
+    textarea{border:none;padding:0;min-height:0;}
+  }
+</style>
+</head>
+<body>
+<div id="header-mount"></div>
+<div id="app"></div>
+<div id="toast"></div>
+<div id="modal-mount"></div>
+
+<script>
+"use strict";
+/* =========================================================
+   探究振り返りカードゲーム
+   - 5画面ステップ形式 / localStorage保存 / 通信なし
+   ========================================================= */
+
+const LS_KEY = "tankyu-card-game-v1";
+const MAX_HAND = 5;          // 手作りカードの上限（余白で5枚に揃える）
+const MAX_FUTURE = 2;        // 未来カードの上限
+
+const TYPES = {
+  seika:   {label:"成果",     cls:"t-seika",   chip:"chip-seika"},
+  process: {label:"プロセス", cls:"t-process", chip:"chip-process"},
+  skill:   {label:"能力",     cls:"t-skill",   chip:"chip-skill"},
+  blank:   {label:"余白",     cls:"t-blank",   chip:"chip-blank"},
+  future:  {label:"未来",     cls:"t-future",  chip:"chip-future"},
+};
+
+const CATEGORIES = ["探究","部活","課外活動","学業","日常・生活"];
+
+const CAT_EXAMPLES = {
+  "探究":[
+    "テーマを途中で変えた（プロセス）",
+    "アンケートを作り直した（プロセス）",
+    "発表をやり切った（成果）",
+  ],
+  "部活":[
+    "3年間続けた（プロセス）",
+    "自主練メニューを自分で組んだ（プロセス）",
+    "ベンチ外でも支え続けた（プロセス）",
+  ],
+  "課外活動":[
+    "生徒会・委員会で動いた（プロセス）",
+    "地域活動・ボランティアに通い続けた（プロセス）",
+    "習い事の発表・作品（成果）",
+  ],
+  "学業":[
+    "質問リストを作って先生に聞きに行った（プロセス）",
+    "毎日決まった時間に机に向かった（プロセス）",
+    "苦手科目を平均点まで上げた（成果）",
+  ],
+  "日常・生活":[
+    "弟妹の世話を担当してきた（プロセス）",
+    "家事と勉強をやりくりした（プロセス）",
+    "友達のもめごとの相談役（プロセス）",
+  ],
+};
+
+const SKILL_VOCAB = [
+  "チャレンジ精神","創造力","課題発見力","コミュニケーション力","論理的思考力",
+  "プレゼン力","情報収集力","問題解決力","企画力","行動力",
+  "決断力","継続する力","優先順位をつける力","人に聞きに行ける力","気持ちを切りかえる力",
+];
+
+const MENUS = [
+  "① 部活・サークルに打ち込む",
+  "② アルバイトで働く経験を積む",
+  "③ 資格・専門の勉強を深める",
+  "④ 留学・旅に出る",
+  "⑤ 人に会いに行く（イベント・コミュニティ）",
+  "⑥ 自分で何かを始める（発信・制作・小さな商売）",
+  "⑦ じっくり探す（決めずに見て回る）",
+];
+
+const STEP_NAMES = ["スタート","① 棚卸し","② 眺める","③ お題1","④ お題2","まとめ"];
+
+/* ---------------- 状態 ---------------- */
+function defaultState(){
+  return {
+    nickname: "",
+    step: 0,               // 0:start 1..4:STEP 5:まとめ
+    cards: [],             // {id,type,title,context,category,sourceId}
+    step2Note: "",
+    step3: { menus: [], why: "", effectiveIds: [] },
+    step4: { playedIds: [], action: "", decl: {} },  // decl: {blankCardId: 宣言文}
+    futureFlipped: false,  // STEP4の裏返し演出を実行済みか
+    summaryNote: "",
+  };
+}
+
+let S = loadState();
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      return Object.assign(defaultState(), parsed);
+    }
+  }catch(e){ /* 壊れたデータは捨てる */ }
+  return defaultState();
+}
+function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }catch(e){} }
+
+function uid(){
+  return (crypto.randomUUID ? crypto.randomUUID() : "id-" + Date.now() + "-" + Math.random().toString(36).slice(2));
+}
+function esc(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function byId(id){ return S.cards.find(c => c.id === id); }
+function handOf(...types){ return S.cards.filter(c => types.includes(c.type)); }
+
+let toastTimer = null;
+function toast(msg){
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+/* ---------------- カードHTML ---------------- */
+function cardHTML(c, opts = {}){
+  const t = TYPES[c.type];
+  const extra = (opts.classes || "");
+  const del = opts.deletable ? `<button class="del" data-del="${c.id}" aria-label="このカードを消す">✕</button>` : "";
+  if(c.type === "blank"){
+    return `<div class="card t-blank ${extra}" data-cid="${c.id}">
+      <div class="band">余白</div>
+      <div class="body"><div class="blank-msg">（白紙のまま持つ）<br>新しく獲りに行く枠</div></div>
+      ${del}</div>`;
+  }
+  const ctx = c.type === "skill"
+    ? `出典：${esc(c.context)}`
+    : esc(c.context);
+  const cat = (c.type === "future") ? "" : `<div class="cat">${esc(c.category || "")}</div>`;
+  return `<div class="card ${t.cls} ${extra}" data-cid="${c.id}">
+    <div class="band">${t.label}${c.type === "future" ? "（まだ実物ではない）" : ""}</div>
+    <div class="body">
+      <div class="ttl">${esc(c.title)}</div>
+      <div class="ctx">${ctx}</div>
+      ${cat}
+    </div>${del}</div>`;
+}
+
+/* 未来カード：3D裏返し対応版 */
+function futureFlipHTML(c, flipped){
+  return `<div class="flip3d ${flipped ? "flipped" : ""}" data-flip="${c.id}">
+    <div class="inner">
+      <div class="face front">${cardHTML(c)}</div>
+      <div class="face back">
+        <div class="card future-back">
+          <div class="body"><div class="back-msg">アテが外れた<br><span class="orig">「${esc(c.title)}」</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------------- ヘッダー ---------------- */
+function renderHeader(){
+  const mount = document.getElementById("header-mount");
+  if(S.step === 0){ mount.innerHTML = ""; return; }
+  const steps = STEP_NAMES.slice(1).map((name, i) => {
+    const n = i + 1;
+    const cls = n === S.step ? "now" : (n < S.step ? "done" : "");
+    return `<div class="st ${cls}">${name}</div>`;
+  }).join("");
+  mount.innerHTML = `<header class="top">
+    <div class="top-row">
+      <span class="app-name">探究振り返りカードゲーム ${S.nickname ? "｜" + esc(S.nickname) : ""}</span>
+      <button class="gear-btn" onclick="openSettings()">⚙ 設定</button>
+    </div>
+    <div class="steps">${steps}</div>
+  </header>`;
+}
+
+/* ---------------- 画面遷移 ---------------- */
+function go(step){
+  S.step = step;
+  save();
+  window.scrollTo(0, 0);
+  render();
+}
+
+function render(){
+  renderHeader();
+  const app = document.getElementById("app");
+  switch(S.step){
+    case 0: app.innerHTML = viewStart(); break;
+    case 1: app.innerHTML = viewStep1(); afterStep1(); break;
+    case 2: app.innerHTML = viewStep2(); afterStep2(); break;
+    case 3: app.innerHTML = viewStep3(); break;
+    case 4: app.innerHTML = viewStep4(); afterStep4(); break;
+    case 5: app.innerHTML = viewSummary(); break;
+  }
+}
+
+/* =========================================================
+   画面0：スタート
+   ========================================================= */
+function viewStart(){
+  return `
+  <div style="padding-top:60px;text-align:center;">
+    <p class="soft" style="letter-spacing:.2em;">探究振り返りワークショップ</p>
+    <h1 style="margin:8px 0 4px;">探究振り返り<br>カードゲーム</h1>
+    <p class="lead" style="margin:14px 0 30px;">
+      高3の夏までにやってきたことを「手札」にして、<br>
+      これからの選択に切ってみるゲームです。<br>
+      勝ち負けはありません。判定するのは、班の対話です。
+    </p>
+    <div class="panel" style="max-width:400px;margin:0 auto;text-align:left;">
+      <label class="f">ニックネーム（本名でなくてOK）</label>
+      <input type="text" id="nick" maxlength="12" placeholder="例：みな" value="${esc(S.nickname)}">
+      <div style="text-align:center;margin-top:16px;">
+        <button class="btn" onclick="startGame()">はじめる</button>
+      </div>
+    </div>
+    <p class="soft no-print" style="margin-top:24px;">
+      データはこの端末の中にだけ保存されます。どこにも送信されません。
+    </p>
+    <p style="margin-top:10px;"><button class="gear-btn" onclick="openSettings()">⚙ 設定（先生用）</button></p>
+  </div>`;
+}
+function startGame(){
+  const nick = document.getElementById("nick").value.trim();
+  if(!nick){ toast("ニックネームを入れてください（本名でなくてOK）"); return; }
+  S.nickname = nick;
+  go(1);
+}
+
+/* =========================================================
+   STEP1：棚卸し
+   ========================================================= */
+let form1 = { type:"seika" };  // フォームの一時状態（typeのみ保持）
+
+function viewStep1(){
+  const made = handOf("seika","process","skill");
+  const left = MAX_HAND - made.length;
+  const catBoxes = CATEGORIES.map(cat => `
+    <details class="catbox">
+      <summary>${cat}</summary>
+      <ul class="exs">${CAT_EXAMPLES[cat].map(e => `<li>${e}</li>`).join("")}</ul>
+    </details>`).join("");
+
+  const cnt = t => made.filter(c => c.type === t).length;
+  const ruleLi = (ok, text) => `<li class="${ok ? "ok" : "ng"}">${ok ? "✔" : "・"} ${text}</li>`;
+
+  return `
+  <div class="panel">
+    <h2>STEP1　棚卸し ─ カードを作る</h2>
+    <p class="lead">高3の夏までを5つのカテゴリーで見わたして、<b>成果 → プロセス → 能力</b>の順にカードにしていこう。派手じゃなくていい。「続けたこと」「工夫したこと」は全部カードになる。</p>
+  </div>
+
+  <div class="panel">
+    <h3>カテゴリーの例（開いて見てみよう）</h3>
+    ${catBoxes}
+  </div>
+
+  <div class="panel">
+    <h3>カードを作る</h3>
+    <label class="f">1. カードの種類</label>
+    <div class="type-picker" id="typePicker">
+      <button data-t="seika"   class="${form1.type==="seika"?"on-seika":""}">成果<br><span style="font-size:10px;font-weight:400;">名詞で書く</span></button>
+      <button data-t="process" class="${form1.type==="process"?"on-process":""}">プロセス<br><span style="font-size:10px;font-weight:400;">動詞で書く</span></button>
+      <button data-t="skill"   class="${form1.type==="skill"?"on-skill":""}">能力<br><span style="font-size:10px;font-weight:400;">力の名前＋出典</span></button>
+    </div>
+
+    <label class="f">2. ひと言タイトル<span class="req">必須・20字まで</span></label>
+    <input type="text" id="f-title" maxlength="20" placeholder="${titlePlaceholder(form1.type)}">
+
+    ${form1.type === "skill" ? `
+      <label class="f">3. 出典カード（どのカードから得た力？）<span class="req">必須</span></label>
+      <select id="f-source">
+        <option value="">── 出典を選ぶ ──</option>
+        ${handOf("seika","process").map(c => `<option value="${c.id}">[${TYPES[c.type].label}] ${esc(c.title)}</option>`).join("")}
+      </select>
+      <p class="soft" style="margin-top:4px;">能力カードは「出典」とセットで強くなります。先に成果かプロセスのカードを作ってから能力を書こう。</p>
+      <p style="margin-top:8px;"><button class="btn small sub" onclick="openVocab()">💡 能力のことばヒント</button></p>
+    ` : `
+      <label class="f">3. 一行文脈<span class="req">必須</span></label>
+      <input type="text" id="f-context" maxlength="40" placeholder="${contextPlaceholder(form1.type)}">
+    `}
+
+    <label class="f">4. 出身カテゴリー<span class="req">必須</span></label>
+    <select id="f-cat">
+      <option value="">── カテゴリーを選ぶ ──</option>
+      ${CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join("")}
+    </select>
+
+    <div style="text-align:center;margin-top:14px;">
+      <button class="btn" onclick="addCard()" ${left <= 0 ? "disabled" : ""}>カードを作る</button>
+    </div>
+    <div class="counter">${left > 0
+      ? `あと <b>${left}枚</b> 作れます（残りは余白カードになります）`
+      : "5枚そろいました。これ以上は作れません"}</div>
+  </div>
+
+  <div class="panel">
+    <h3>手札プレビュー（${made.length}枚）</h3>
+    <div class="hand" id="hand1">
+      ${made.map(c => cardHTML(c, {deletable:true})).join("") || `<p class="soft">まだカードがありません。上のフォームから作ってみよう。</p>`}
+    </div>
+    <ul class="rule-check">
+      ${ruleLi(cnt("seika")>=1, "成果カードが1枚以上ある")}
+      ${ruleLi(cnt("process")>=1, "プロセスカードが1枚以上ある")}
+      ${ruleLi(cnt("skill")>=1, "能力カードが1枚以上ある")}
+    </ul>
+  </div>
+
+  <div class="navrow">
+    <button class="btn sub" onclick="go(0)">← もどる</button>
+    <button class="btn" onclick="finishStep1()">手札を確定して次へ →</button>
+  </div>`;
+}
+
+function titlePlaceholder(t){
+  return {
+    seika:"例：商店街調査の発表（できたこと・生まれたものを名詞で）",
+    process:"例：配り方を3回変えた（〜した、と動詞で）",
+    skill:"例：人に聞きに行ける力（力の名前で）",
+  }[t];
+}
+function contextPlaceholder(t){
+  return {
+    seika:"誰に何を届けた？　例：商店主15人の声を全校に発表",
+    process:"どんな状況で？　例：回収率が低くて困っていたとき",
+  }[t];
+}
+
+function afterStep1(){
+  // 種別ボタン
+  document.querySelectorAll("#typePicker button").forEach(b => {
+    b.onclick = () => {
+      // 入力途中のタイトルを保持したまま種別を切り替える
+      const titleEl = document.getElementById("f-title");
+      const keep = titleEl ? titleEl.value : "";
+      form1.type = b.dataset.t;
+      render();
+      const t2 = document.getElementById("f-title");
+      if(t2) t2.value = keep;
+    };
+  });
+  // 削除
+  document.querySelectorAll("#hand1 [data-del]").forEach(b => {
+    b.onclick = () => deleteCard(b.dataset.del);
+  });
+}
+
+function addCard(){
+  const made = handOf("seika","process","skill");
+  if(made.length >= MAX_HAND){ toast("手札は5枚までです"); return; }
+
+  const title = document.getElementById("f-title").value.trim();
+  const cat = document.getElementById("f-cat").value;
+  if(!title){ toast("ひと言タイトルを入れてください"); return; }
+  if(!cat){ toast("出身カテゴリーを選んでください"); return; }
+
+  let context = "", sourceId = null;
+  if(form1.type === "skill"){
+    sourceId = document.getElementById("f-source").value;
+    if(!sourceId){ toast("能力カードには出典が必要です。どのカードから得た力か選ぼう"); return; }
+    context = byId(sourceId).title;   // 出典カード名を文脈に持つ
+  }else{
+    context = document.getElementById("f-context").value.trim();
+    if(!context){ toast("一行文脈を入れてください"); return; }
+  }
+
+  S.cards.push({ id: uid(), type: form1.type, title, context, category: cat, sourceId });
+  save();
+  render();
+  // 追加されたカードにめくりアニメーション
+  const hand = document.getElementById("hand1");
+  const last = hand && hand.querySelector(".card:last-of-type");
+  if(last){ last.classList.add("deal"); last.scrollIntoView({behavior:"smooth", inline:"end", block:"nearest"}); }
+}
+
+function deleteCard(id){
+  const c = byId(id);
+  if(!c) return;
+  const dependent = S.cards.find(x => x.type === "skill" && x.sourceId === id);
+  if(dependent){
+    toast(`このカードは能力カード「${dependent.title}」の出典です。先にそちらを消してください`);
+    return;
+  }
+  S.cards = S.cards.filter(x => x.id !== id);
+  save();
+  render();
+}
+
+function finishStep1(){
+  const made = handOf("seika","process","skill");
+  const cnt = t => made.filter(c => c.type === t).length;
+  if(cnt("seika") < 1 || cnt("process") < 1 || cnt("skill") < 1){
+    toast("成果・プロセス・能力を、それぞれ1枚以上作ってください");
+    return;
+  }
+  // 5枚に満たない分を余白カードで埋める（作り直しにも対応：一度リセットして詰め直す）
+  S.cards = S.cards.filter(c => c.type !== "blank");
+  const blanks = MAX_HAND - made.length;
+  for(let i = 0; i < blanks; i++){
+    S.cards.push({ id: uid(), type: "blank", title: "", context: "", category: "", sourceId: null });
+  }
+  go(2);
+}
+
+/* =========================================================
+   STEP2：手札を眺める
+   ========================================================= */
+function viewStep2(){
+  const hand = handOf("seika","process","skill","blank");
+  return `
+  <div class="panel">
+    <h2>STEP2　手札を眺める</h2>
+    <p class="lead">できあがった手札を、少しはなれて眺めてみよう。カードはドラッグで並べ替えられます。</p>
+  </div>
+
+  <div class="panel">
+    <h3>あなたの手札（${hand.length}枚）</h3>
+    <div class="hand" id="hand2">
+      ${hand.map(c => cardHTML(c)).join("")}
+    </div>
+    <p class="drag-hint">⇄ カードを長押しして左右にドラッグすると並べ替えできます</p>
+  </div>
+
+  <div class="panel">
+    <h3>観察の問い</h3>
+    <p style="font-size:15px;font-weight:700;margin-bottom:10px;">あなたの手札、どの種類が多い？　どのカテゴリーから生まれた？</p>
+    <label class="f">気づきメモ（1〜2行、書かなくてもOK）</label>
+    <textarea id="note2" maxlength="120" placeholder="例：プロセスばっかりだ。ぜんぶ部活から生まれてる。">${esc(S.step2Note)}</textarea>
+  </div>
+
+  <div class="hint-box">👀 <b>隣の人と手札を見せ合ってみよう。</b>「へえ、それカードになるんだ」が見つかるはず。</div>
+
+  <div class="navrow">
+    <button class="btn sub" onclick="go(1)">← もどる</button>
+    <button class="btn" onclick="finishStep2()">次へ →</button>
+  </div>`;
+}
+
+function afterStep2(){
+  const note = document.getElementById("note2");
+  note.addEventListener("input", () => { S.step2Note = note.value; save(); });
+  enableDragSort(document.getElementById("hand2"));
+}
+
+function finishStep2(){
+  S.step2Note = document.getElementById("note2").value;
+  go(3);
+}
+
+/* --- ドラッグ並べ替え（マウス・タッチ共通：Pointer Events） --- */
+function enableDragSort(container){
+  if(!container) return;
+  let dragEl = null;
+
+  container.querySelectorAll(".card").forEach(card => {
+    card.style.touchAction = "pan-x";
+    let holdTimer = null, started = false, startX = 0, startY = 0;
+
+    card.addEventListener("pointerdown", e => {
+      startX = e.clientX; startY = e.clientY; started = false;
+      holdTimer = setTimeout(() => {   // 長押しでドラッグ開始（横スクロールと共存）
+        started = true;
+        dragEl = card;
+        card.classList.add("dragging");
+        card.setPointerCapture(e.pointerId);
+      }, 220);
+    });
+
+    card.addEventListener("pointermove", e => {
+      if(!started){
+        if(Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8) clearTimeout(holdTimer);
+        return;
+      }
+      e.preventDefault();
+      const siblings = [...container.querySelectorAll(".card")].filter(c => c !== dragEl);
+      for(const sib of siblings){
+        const r = sib.getBoundingClientRect();
+        if(e.clientX > r.left && e.clientX < r.right){
+          const before = e.clientX < r.left + r.width / 2;
+          container.insertBefore(dragEl, before ? sib : sib.nextSibling);
+          break;
+        }
+      }
+    });
+
+    const end = () => {
+      clearTimeout(holdTimer);
+      if(started && dragEl){
+        dragEl.classList.remove("dragging");
+        // DOMの並び順を状態に反映
+        const order = [...container.querySelectorAll(".card")].map(el => el.dataset.cid);
+        S.cards.sort((a, b) => {
+          const ia = order.indexOf(a.id), ib = order.indexOf(b.id);
+          if(ia === -1 || ib === -1) return 0;
+          return ia - ib;
+        });
+        save();
+      }
+      dragEl = null; started = false;
+    };
+    card.addEventListener("pointerup", end);
+    card.addEventListener("pointercancel", end);
+  });
+}
+
+/* =========================================================
+   STEP3：お題1「大学生、何する？」
+   ========================================================= */
+function viewStep3(){
+  const hand = handOf("seika","process","skill","blank");
+  const futures = handOf("future");
+  const hasBlank = handOf("blank").length > 0;
+  const menusDone = S.step3.menus.length === 2;
+
+  return `
+  <div class="panel">
+    <h2>STEP3　お題1「大学生、何する？」</h2>
+    <div class="talk-box" style="background:#fbf7ee;border-color:#eadfc4;">
+      🎓 入学して1ヶ月。生活が落ち着いてきた。<b>空いた時間で何かを始められそうだ。</b>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>メニューから <u>2つ</u> 選ぼう（${S.step3.menus.length}/2）</h3>
+    ${MENUS.map((m, i) => {
+      const on = S.step3.menus.includes(i);
+      const off = !on && menusDone;
+      return `<label class="menu-item ${on ? "on" : ""} ${off ? "off" : ""}">
+        <input type="checkbox" ${on ? "checked" : ""} ${off ? "disabled" : ""} onchange="toggleMenu(${i})">
+        <span>${m}</span></label>`;
+    }).join("")}
+    ${hasBlank ? `<div class="hint-box">🃏 余白カードを持っている人へ：余白は<b>「⑦じっくり探す」と一緒に切ってもいい</b>。「いろんなものを見て回る」も立派な戦略。</div>` : ""}
+  </div>
+
+  <div class="panel">
+    <h3>3つの問い</h3>
+    <label class="f">Q1. なぜその2つ？</label>
+    <textarea id="q-why" maxlength="200" placeholder="例：現場で働く経験と、自分で始める経験は両方ほしいから。">${esc(S.step3.why)}</textarea>
+
+    <label class="f">Q2. 手持ちのどのカードが効く？（タップで選ぶ・複数OK）</label>
+    <div class="hand">
+      ${hand.map(c => cardHTML(c, {classes:"pickable" + (S.step3.effectiveIds.includes(c.id) ? " picked" : "")})).join("")}
+    </div>
+
+    <label class="f">Q3. この選択で、どんなカードが手に入りそう？ → 未来カードを発行（1〜2枚）</label>
+    <p class="soft">未来カードは点線の枠。<b>まだ実物ではない</b>「これから獲りに行くカード」です。</p>
+    <div class="hand">
+      ${futures.map(c => cardHTML(c, {deletable:true})).join("") || `<p class="soft">まだ未来カードがありません。</p>`}
+    </div>
+    ${futures.length < MAX_FUTURE ? `
+      <label class="f">未来カードのタイトル（20字まで）</label>
+      <input type="text" id="fut-title" maxlength="20" placeholder="例：働く現場で大人と協働する力">
+      <label class="f">ひとこと（どんなカード？・省略OK）</label>
+      <input type="text" id="fut-ctx" maxlength="40" placeholder="例：バイト先で年上の人とチームで動く">
+      <div style="text-align:center;margin-top:12px;">
+        <button class="btn small" onclick="addFuture()">＋ 未来カードを発行する</button>
+      </div>` : `<p class="soft" style="text-align:center;">未来カードは2枚まで。発行ずみです。</p>`}
+  </div>
+
+  <div class="talk-box">🗣 <b>班で共有しよう（語りの型）</b><br>
+    「私は <b>◯◯</b> と <b>◯◯</b> を選ぶ。<b>このカード</b>が効くから。そして、<b>この未来カード</b>を獲りに行く」
+  </div>
+
+  <div class="navrow">
+    <button class="btn sub" onclick="backTo2()">← もどる</button>
+    <button class="btn" onclick="finishStep3()">次へ →</button>
+  </div>`;
+}
+
+function toggleMenu(i){
+  saveStep3Texts();
+  const m = S.step3.menus;
+  if(m.includes(i)) S.step3.menus = m.filter(x => x !== i);
+  else if(m.length < 2) m.push(i);
+  save(); render();
+}
+
+document.addEventListener("click", e => {
+  // Q2：カードのタップ選択（STEP3）
+  if(S.step === 3){
+    const el = e.target.closest(".pickable");
+    if(el){
+      saveStep3Texts();
+      const id = el.dataset.cid;
+      const list = S.step3.effectiveIds;
+      S.step3.effectiveIds = list.includes(id) ? list.filter(x => x !== id) : [...list, id];
+      save(); render();
+    }
+    const del = e.target.closest("[data-del]");
+    if(del){
+      saveStep3Texts();
+      S.cards = S.cards.filter(c => c.id !== del.dataset.del);
+      save(); render();
+    }
+  }
+  // STEP4：カードのタップ選択
+  if(S.step === 4){
+    const el = e.target.closest(".pickable");
+    if(el){
+      saveStep4Texts();
+      const id = el.dataset.cid;
+      const list = S.step4.playedIds;
+      S.step4.playedIds = list.includes(id) ? list.filter(x => x !== id) : [...list, id];
+      save(); render();
+    }
+  }
+});
+
+function saveStep3Texts(){
+  const why = document.getElementById("q-why");
+  if(why) S.step3.why = why.value;
+}
+function addFuture(){
+  saveStep3Texts();
+  if(handOf("future").length >= MAX_FUTURE){ toast("未来カードは2枚までです"); return; }
+  const title = document.getElementById("fut-title").value.trim();
+  if(!title){ toast("未来カードのタイトルを入れてください"); return; }
+  const ctx = document.getElementById("fut-ctx").value.trim();
+  S.cards.push({ id: uid(), type: "future", title, context: ctx, category: "", sourceId: null });
+  save(); render();
+}
+function backTo2(){ saveStep3Texts(); save(); go(2); }
+function finishStep3(){
+  saveStep3Texts();
+  if(S.step3.menus.length !== 2){ toast("メニューを2つ選んでください"); return; }
+  if(handOf("future").length < 1){ toast("未来カードを1枚以上、発行してください"); return; }
+  save();
+  go(4);
+}
+
+/* =========================================================
+   STEP4：お題2「思ってたのと違った、どうする？」
+   ========================================================= */
+function viewStep4(){
+  const usable = handOf("seika","process","skill","blank");
+  const futures = handOf("future");
+  const pickedBlanks = usable.filter(c => c.type === "blank" && S.step4.playedIds.includes(c.id));
+
+  return `
+  <div class="panel">
+    <h2>STEP4　お題2「思ってたのと違った、どうする？」</h2>
+  </div>
+
+  <div class="flip-msg">
+    選んだ先が、<b>思っていたのと違いました。</b><br>
+    想像よりずっと大変、あるいは、想像よりつまらない。<br>
+    未来カードの<b>アテが外れました。</b>
+  </div>
+
+  <div class="panel">
+    <h3>未来カード</h3>
+    <div class="hand" id="futureRow">
+      ${futures.map(c => futureFlipHTML(c, S.futureFlipped)).join("")}
+    </div>
+    <div class="hint-box">📜 <b>ルール：</b>使えるのは、<b>高3夏までの手札</b>と、<b>余白</b>だけ。裏返った未来カードは使えません。</div>
+  </div>
+
+  <div class="panel">
+    <h3>手札から切るカードを選ぼう（タップ・複数OK）</h3>
+    <div class="hand">
+      ${usable.map(c => cardHTML(c, {classes:"pickable" + (S.step4.playedIds.includes(c.id) ? " picked" : "")})).join("")}
+    </div>
+
+    ${pickedBlanks.map(c => `
+      <label class="f">🃏 余白カードを切ります → <b>獲得宣言</b>（未来形で書く）<span class="req">必須</span></label>
+      <input type="text" class="decl-input" data-decl="${c.id}" maxlength="60"
+        placeholder="私はこの状況で、◯◯を獲りに行きます"
+        value="${esc(S.step4.decl[c.id] || "")}">
+    `).join("")}
+
+    <label class="f">どう動く？</label>
+    <textarea id="q-action" maxlength="300" placeholder="例：まずは続けてみて、そのあいだに他の場所も見に行く。">${esc(S.step4.action)}</textarea>
+  </div>
+
+  <div class="talk-box">🗣 <b>班で共有しよう（語りの型）</b><br>
+    「私なら、<b>このカード</b>（過去形）で耐える／動く。そして余白で、<b>◯◯を獲りに行く</b>（未来形）」
+  </div>
+
+  <div class="navrow">
+    <button class="btn sub" onclick="backTo3()">← もどる</button>
+    <button class="btn" onclick="finishStep4()">まとめへ →</button>
+  </div>`;
+}
+
+function afterStep4(){
+  // 初回だけ、少し間を置いて未来カードを裏返す（山場の演出）
+  if(!S.futureFlipped){
+    setTimeout(() => {
+      document.querySelectorAll("#futureRow .flip3d").forEach((el, i) => {
+        setTimeout(() => el.classList.add("flipped"), i * 350);
+      });
+      S.futureFlipped = true;
+      save();
+    }, 900);
+  }
+  document.querySelectorAll(".decl-input").forEach(inp => {
+    inp.addEventListener("input", () => { S.step4.decl[inp.dataset.decl] = inp.value; save(); });
+  });
+  const act = document.getElementById("q-action");
+  if(act) act.addEventListener("input", () => { S.step4.action = act.value; save(); });
+}
+
+function saveStep4Texts(){
+  const act = document.getElementById("q-action");
+  if(act) S.step4.action = act.value;
+  document.querySelectorAll(".decl-input").forEach(inp => { S.step4.decl[inp.dataset.decl] = inp.value; });
+}
+function backTo3(){ saveStep4Texts(); save(); go(3); }
+function finishStep4(){
+  saveStep4Texts();
+  if(S.step4.playedIds.length < 1){ toast("手札から切るカードを1枚以上選んでください"); return; }
+  const blanksNoDecl = S.step4.playedIds
+    .map(byId)
+    .filter(c => c && c.type === "blank" && !(S.step4.decl[c.id] || "").trim());
+  if(blanksNoDecl.length > 0){
+    toast("余白カードを切るときは、獲得宣言（「◯◯を獲りに行きます」）を書いてください");
+    return;
+  }
+  if(!S.step4.action.trim()){ toast("「どう動く？」をひとこと書いてください"); return; }
+  save();
+  go(5);
+}
+
+/* =========================================================
+   まとめ画面
+   ========================================================= */
+function viewSummary(){
+  const hand = handOf("seika","process","skill","blank");
+  const futures = handOf("future");
+  const menus = S.step3.menus.map(i => MENUS[i]).join("　");
+  const effCards = S.step3.effectiveIds.map(byId).filter(Boolean);
+  const playedCards = S.step4.playedIds.map(byId).filter(Boolean);
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日`;
+
+  const chip = c => `<span class="${TYPES[c.type].chip}">${c.type === "blank" ? "余白" : esc(c.title)}</span>`;
+
+  return `
+  <div class="panel" style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;">
+    <h2 style="margin:0;">まとめ　─ ${esc(S.nickname)} の手札</h2>
+    <span class="soft">${dateStr}</span>
+  </div>
+
+  <div class="panel">
+    <h3>手札（高3夏まで）</h3>
+    <div class="sum-grid">${hand.map(c => cardHTML(c)).join("")}</div>
+    ${S.step2Note.trim() ? `<p class="ansline"><b>気づきメモ：</b>${esc(S.step2Note)}</p>` : ""}
+  </div>
+
+  <div class="panel">
+    <h3>未来カード（お題1で発行 → お題2で裏返った）</h3>
+    <div class="sum-grid">${futures.map(c => futureFlipHTML(c, true)).join("")}</div>
+  </div>
+
+  <div class="panel">
+    <h3>お題1「大学生、何する？」の回答</h3>
+    <p class="ansline"><b>選んだメニュー：</b>${esc(menus) || "─"}</p>
+    <p class="ansline"><b>なぜその2つ？：</b>${esc(S.step3.why) || "─"}</p>
+    <p class="ansline"><b>効くと思ったカード：</b></p>
+    <div class="tagchips">${effCards.map(chip).join("") || `<span style="background:#ccc;">─</span>`}</div>
+  </div>
+
+  <div class="panel">
+    <h3>お題2「思ってたのと違った、どうする？」の回答</h3>
+    <p class="ansline"><b>切ったカード：</b></p>
+    <div class="tagchips">${playedCards.map(chip).join("") || `<span style="background:#ccc;">─</span>`}</div>
+    ${playedCards.filter(c => c.type === "blank").map(c =>
+      `<p class="ansline">🃏 <b>獲得宣言：</b>${esc(S.step4.decl[c.id] || "")}</p>`).join("")}
+    <p class="ansline"><b>どう動く？：</b>${esc(S.step4.action) || "─"}</p>
+  </div>
+
+  <div class="panel">
+    <h3>今日の気づき（振り返りパートで書く）</h3>
+    <textarea id="sum-note" maxlength="300" placeholder="今日いちばん残ったことを、ひとこと。">${esc(S.summaryNote)}</textarea>
+  </div>
+
+  <div class="navrow no-print">
+    <button class="btn sub" onclick="go(4)">← もどる</button>
+    <button class="btn" onclick="window.print()">🖨 印刷・画像保存</button>
+  </div>
+  <p class="soft no-print" style="text-align:center;margin-top:10px;">
+    スクリーンショットを撮っておくと、振り返りのときに見返せます。
+  </p>
+  <script>/*noop*/<\/script>`;
+}
+
+document.addEventListener("input", e => {
+  if(e.target.id === "sum-note"){ S.summaryNote = e.target.value; save(); }
+});
+
+/* =========================================================
+   モーダル：能力の語彙集
+   ========================================================= */
+function openVocab(){
+  document.getElementById("modal-mount").innerHTML = `
+  <div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <h3>💡 能力のことばヒント</h3>
+      <p class="soft">ぴったりの言葉がなければ、自分の言葉で書いてOK。</p>
+      <div class="vocab">${SKILL_VOCAB.map(v => `<span>${v}</span>`).join("")}</div>
+      <p class="soft">どのカードから得た力か（出典）とセットにすると、ぐっと強いカードになります。</p>
+      <div style="text-align:center;margin-top:12px;"><button class="btn small sub" onclick="closeModal()">とじる</button></div>
+    </div>
+  </div>`;
+}
+function closeModal(){ document.getElementById("modal-mount").innerHTML = ""; }
+
+/* =========================================================
+   設定（先生用）：全データリセット・テストデータ
+   ========================================================= */
+function openSettings(){
+  document.getElementById("modal-mount").innerHTML = `
+  <div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <h3>⚙ 設定（先生用）</h3>
+      <p class="soft">この端末に保存されたデータの管理をします。</p>
+      <div style="margin:16px 0;">
+        <button class="btn sub" style="width:100%;border-color:#e0b4a5;color:#b13b1c;" onclick="resetAll()">🗑 全データリセット（端末の使い回し用）</button>
+      </div>
+      <details>
+        <summary style="cursor:pointer;font-size:13px;color:var(--ink-soft);">動作確認用テストデータ（4ペルソナ）</summary>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+          <button class="btn small sub" onclick="loadPersona('mina')">ミナ（探究充実型・手札5枚）</button>
+          <button class="btn small sub" onclick="loadPersona('kenta')">ケンタ（部活一筋型・手札3枚＋余白2）</button>
+          <button class="btn small sub" onclick="loadPersona('aoi')">アオイ（日常型・手札3枚＋余白2）</button>
+          <button class="btn small sub" onclick="loadPersona('yu')">ユウ（学業型・手札4枚＋余白1）</button>
+        </div>
+        <p class="soft" style="margin-top:8px;">読み込むと現在のデータは消え、STEP1から通しで確認できます。</p>
+      </details>
+      <div style="text-align:center;margin-top:16px;"><button class="btn small sub" onclick="closeModal()">とじる</button></div>
+    </div>
+  </div>`;
+}
+
+function resetAll(){
+  if(!confirm("この端末のデータをすべて消します。よろしいですか？")) return;
+  localStorage.removeItem(LS_KEY);
+  S = defaultState();
+  closeModal();
+  render();
+  toast("すべてのデータを消しました");
+}
+
+/* ---------------- テスト用ペルソナ ---------------- */
+function loadPersona(key){
+  const P = buildPersona(key);
+  if(!P) return;
+  localStorage.removeItem(LS_KEY);
+  S = P;
+  save();
+  closeModal();
+  render();
+  toast(`テストデータ「${P.nickname}」を読み込みました`);
+}
+
+function buildPersona(key){
+  const mk = (type, title, context, category, sourceId) =>
+    ({ id: uid(), type, title, context, category: category || "", sourceId: sourceId || null });
+
+  if(key === "mina"){
+    const c1 = mk("seika","商店街調査の発表をやり切った","商店主15人の声を全校に発表","探究");
+    const c2 = mk("process","アンケートの配り方を3回変えた","回収率が低くて困っていたとき","探究");
+    const c3 = mk("process","商店主にインタビューを申し込んだ","知らない大人に自分から連絡した","探究");
+    const c4 = mk("skill","初対面の大人に話を聞ける力", c3.title, "探究", c3.id);
+    const c5 = mk("skill","データを集め直す粘り強さ", c2.title, "探究", c2.id);
+    const f1 = mk("future","働く現場で大人と協働する力","バイト先で年上の人とチームで動く");
+    return Object.assign(defaultState(), {
+      nickname:"ミナ", step:1,
+      cards:[c1,c2,c3,c4,c5,f1],
+      step3:{ menus:[1,5], why:"働く経験と、自分で始める経験は両方ほしいから。", effectiveIds:[c4.id,c5.id] },
+    });
+  }
+  if(key === "kenta"){
+    const c1 = mk("seika","野球部で3年間続けた記録","レギュラーでなくても最後まで","部活");
+    const c2 = mk("process","自主練メニューを組んで毎朝続けた","結果が出ない時期も朝練を欠かさず","部活");
+    const c3 = mk("skill","結果が出なくても継続する力", c2.title, "部活", c2.id);
+    const f1 = mk("future","野球以外の世界を3つのぞく","サークル・バイト・イベントを見て回る");
+    return Object.assign(defaultState(), {
+      nickname:"ケンタ", step:1,
+      cards:[c1,c2,c3,f1],
+      step3:{ menus:[0,6], why:"部活は続けたい。でも野球しか知らないから、余白は⑦と一緒に切って世界を広げる。", effectiveIds:[c3.id] },
+    });
+  }
+  if(key === "aoi"){
+    const c1 = mk("seika","弟妹の朝の支度を3年間担当","家族の朝を毎日まわしてきた","日常・生活");
+    const c2 = mk("process","家事と勉強の時間をやりくりし続けた","部活はできなかったが両立した","日常・生活");
+    const c3 = mk("skill","限られた時間で優先順位をつける力", c2.title, "日常・生活", c2.id);
+    const f1 = mk("future","自分で稼いだお金で決める経験","バイト代の使いみちを自分で決める");
+    return Object.assign(defaultState(), {
+      nickname:"アオイ", step:1,
+      cards:[c1,c2,c3,f1],
+      step3:{ menus:[1,4], why:"家の外の世界で、自分の時間とお金を自分で動かしてみたいから。", effectiveIds:[c3.id] },
+    });
+  }
+  if(key === "yu"){
+    const c1 = mk("seika","苦手だった数学を平均点まで上げた","模試の点数で証明できる","学業");
+    const c2 = mk("process","質問リストを作って先生に聞きに行った","わからない所を言葉にしてから質問","学業");
+    const c3 = mk("process","毎日決まった時間に机に向かった","気分に左右されない仕組みを作った","学業");
+    const c4 = mk("skill","わからないことを言語化して聞く力", c2.title, "学業", c2.id);
+    const f1 = mk("future","これだと思える専門分野","1年目は⑦で見て回り、その後③で深める");
+    return Object.assign(defaultState(), {
+      nickname:"ユウ", step:1,
+      cards:[c1,c2,c3,c4,f1],
+      step3:{ menus:[2,6], why:"1年目は⑦でじっくり探し、決まったら③で深める。時間差の計画。", effectiveIds:[c4.id] },
+    });
+  }
+  return null;
+}
+
+/* ---------------- 起動 ---------------- */
+render();
+</script>
+</body>
+</html>
